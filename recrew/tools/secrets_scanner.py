@@ -1,6 +1,8 @@
 """
-Secrets scanner — 15 tipos de secrets con regex específicos.
-Escanea HTML, comentarios e JS files. Deduplica. Filtra noise.
+Secrets scanner — regex-based detection.
+Fixes:
+- BASIC_AUTH_IN_URL: excluye comillas para no matchear JSON-LD
+- INTERNAL_IP: requiere 4 octetos reales
 """
 import re
 import logging
@@ -23,8 +25,10 @@ SECRET_PATTERNS: dict[str, str] = {
     "DATABASE_URL":        r"(?i)(?:mysql|postgres|mongodb|redis|mssql)://[^\s'\"<>\n]{8,}",
     "GENERIC_API_KEY":     r"(?i)(?:api[_-]?key|apikey)\s*[:=]\s*['\"]([a-zA-Z0-9_\-]{20,})['\"]",
     "GENERIC_SECRET":      r"(?i)(?:client_secret|app_secret|secret_key)\s*[:=]\s*['\"]([a-zA-Z0-9!@#$%^&*_\-]{10,})['\"]",
-    "INTERNAL_IP":         r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}|192\.168\.\d{1,3})\.\d{1,3}\b",
-    "BASIC_AUTH_IN_URL":   r"https?://[^:@\s\n]+:[^@\s\n]+@[^\s\n/]+",
+    # FIX: excluir comillas y caracteres JSON para no matchear JSON-LD estructurado
+    "BASIC_AUTH_IN_URL":   r"https?://[^\"'`\s\n:@]{3,}:[^\"'`\s\n@]{3,}@[^\"'`\s\n/]{3,}",
+    # FIX: requiere exactamente 4 octetos (sin esto matcheaba "10.0.4" = versiones)
+    "INTERNAL_IP":         r"\b(?:10\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}|192\.168\.\d{1,3})\.\d{1,3}\b",
 }
 
 _NOISE = [
@@ -32,6 +36,15 @@ _NOISE = [
     "REPLACE_", "changeme", "xxxxxxxxx", "000000000000",
     "localhost", "your-api-key", "sk-your", "API_KEY_HERE",
     "XXXX", "test_key", "dummy",
+    # FIX: versiones de paquetes npm/composer que matchean INTERNAL_IP
+    "10.0.4", "10.12.6", "10.0.0", "10.1.0",
+]
+
+# Comentarios/scripts donde no buscar secrets (demasiado ruido)
+_SKIP_SOURCES = [
+    "googletagmanager", "google-analytics", "facebook.net",
+    "cdn.cookielaw", "pinimg.com", "jquery.min.js",
+    "wp-emoji", "font-awesome", "elementor-icons",
 ]
 
 
@@ -39,14 +52,17 @@ def scan_secrets(ctx: ReconContext) -> dict:
     sources: list[tuple[str, str]] = []
 
     for page in ctx.pages:
-        sources.append((page.url, page.html))
+        # Solo escanear comentarios HTML y scripts inline pequeños
         for c in page.comments:
             sources.append((page.url, c))
         for s in page.inline_scripts:
-            sources.append((page.url, s))
+            if len(s) < 5000:  # scripts inline cortos son más interesantes
+                sources.append((page.url, s))
 
     for js in ctx.js_files:
-        sources.append((js.url, js.content))
+        # Solo JS del mismo dominio y no del CDN
+        if not any(skip in js.url for skip in _SKIP_SOURCES):
+            sources.append((js.url, js.content))
 
     seen: set[str] = set()
     found: list[Secret] = []
@@ -54,10 +70,16 @@ def scan_secrets(ctx: ReconContext) -> dict:
     for source_url, text in sources:
         if not text:
             continue
+        # Saltar fuentes ruidosas
+        if any(skip in source_url for skip in _SKIP_SOURCES):
+            continue
         for stype, pattern in SECRET_PATTERNS.items():
             for match in re.finditer(pattern, text):
                 val = match.group(0)
                 if _is_noise(val):
+                    continue
+                # FIX adicional: no reportar IPs que sean versiones semver
+                if stype == "INTERNAL_IP" and _is_version_number(val, text, match.start()):
                     continue
                 key = f"{stype}:{val[:40]}"
                 if key in seen:
@@ -87,3 +109,11 @@ def scan_secrets(ctx: ReconContext) -> dict:
 def _is_noise(val: str) -> bool:
     low = val.lower()
     return any(n.lower() in low for n in _NOISE)
+
+
+def _is_version_number(ip: str, text: str, pos: int) -> bool:
+    """Detecta si el IP-like string es en realidad un número de versión."""
+    # Contexto: buscar si está precedido por '=' o '"' típico de versiones
+    context_before = text[max(0, pos - 20): pos]
+    version_indicators = ["ver=", "version=", "?ver", "ver:", '"version":', "'version':"]
+    return any(v in context_before.lower() for v in version_indicators)

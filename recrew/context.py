@@ -58,4 +58,5 @@ class ReconContext:
     auth_cookies: dict[str, str] = field(default_factory=dict)
     auth_headers: dict[str, str] = field(default_factory=dict)
     agent_log: list[str] = field(default_factory=list)
+    agent_summary: str = ""        # ← NUEVO: análisis del LLM
     report_path: Optional[str] = None

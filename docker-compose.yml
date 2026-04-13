@@ -8,8 +8,5 @@ services:
     volumes:
       - ./reports:/app/reports
     network_mode: host
-    security_opt:
-      - seccomp:unconfined
-    shm_size: "2gb"
     command: ${TARGET_URL:-https://example.com}
     restart: "no"

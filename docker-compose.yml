@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   recrew:
     build:
@@ -9,10 +7,9 @@ services:
     env_file: .env
     volumes:
       - ./reports:/app/reports
-    # host network → acceso a LM Studio en 192.168.50.213 desde Docker
     network_mode: host
     security_opt:
-      - seccomp:unconfined   # Chromium sandbox necesita esto en Docker
-    shm_size: "2gb"          # Chromium necesita shared memory
+      - seccomp:unconfined
+    shm_size: "2gb"
     command: ${TARGET_URL:-https://example.com}
     restart: "no"

@@ -1,0 +1,11 @@
+openai-agents>=0.0.19
+openai>=1.68.0
+playwright==1.44.0
+beautifulsoup4==4.12.3
+lxml==5.2.2
+httpx[http2]==0.27.2
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+python-dotenv==1.0.1
+anthropic>=0.28.0
+rich==13.7.1

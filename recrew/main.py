@@ -99,6 +99,9 @@ async def run_recon(target_url: str) -> None:
         context=ctx,
     )
 
+    # ← NUEVO: guardar el summary para incluirlo en el report
+    ctx.agent_summary = result.final_output
+
     console.print(Panel(
         result.final_output,
         title="[bold green]✅ Recon Complete",
